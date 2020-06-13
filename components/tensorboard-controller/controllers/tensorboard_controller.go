@@ -128,40 +128,49 @@ func (r *TensorboardReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func generateDeployment(tb *tensorboardv1alpha1.Tensorboard, log logr.Logger) *appsv1.Deployment {
-	volumeMounts := []v1.VolumeMount{
-		{
-			Name:      "gcp-creds",
-			ReadOnly:  true,
-			MountPath: "/secret/gcp",
-		},
-	}
-	volumes := []v1.Volume{
-		{
-			Name: "gcp-creds",
-			VolumeSource: v1.VolumeSource{
-				Secret: &v1.SecretVolumeSource{
-					SecretName: "user-gcp-sa",
+	var volumeMounts []v1.VolumeMount
+	var volumes []v1.Volume
+
+	if isCloudPath(tb.Spec.LogsPath) {
+		if isGoogleCloudPath(tb.Spec.LogsPath) {
+			//In this case, Google Cloud Buckets are used as log storages for Tensorboard server
+			volumeMounts = []v1.VolumeMount{
+				{
+					Name:      "gcp-creds",
+					ReadOnly:  true,
+					MountPath: "/secret/gcp",
 				},
-			},
-		},
-	}
-	// pvc is required for training metrics if logspath is a local directly(rather than cloudpath)
-	if !isCloudPath(tb.Spec.LogsPath) {
-		volumeMounts = append(volumeMounts,
-			v1.VolumeMount{
+			}
+			volumes = []v1.Volume{
+				{
+					Name: "gcp-creds",
+					VolumeSource: v1.VolumeSource{
+						Secret: &v1.SecretVolumeSource{
+							SecretName: "user-gcp-sa",
+						},
+					},
+				},
+			}
+		}
+	} else {
+		//In this case, a PVC is used as log storage for Tensorboard server
+		volumeMounts = []v1.VolumeMount{
+			{
 				Name:      "tbpd",
 				ReadOnly:  true,
 				MountPath: tb.Spec.LogsPath,
-			})
-		volumes = append(volumes,
-			v1.Volume{
+			},
+		}
+		volumes = []v1.Volume{
+			{
 				Name: "tbpd",
 				VolumeSource: v1.VolumeSource{
 					PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
 						ClaimName: "tb-volume",
 					},
 				},
-			})
+			},
+		}
 	}
 
 	return &appsv1.Deployment{
@@ -278,4 +287,8 @@ func generateVirtualService(tb *tensorboardv1alpha1.Tensorboard) (*unstructured.
 
 func isCloudPath(path string) bool {
 	return strings.HasPrefix(path, "gs://") || strings.HasPrefix(path, "s3://") || strings.HasPrefix(path, "/cns/")
+}
+
+func isGoogleCloudPath(path string) bool {
+	return strings.HasPrefix(path, "gs://")
 }
